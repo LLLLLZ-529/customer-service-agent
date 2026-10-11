@@ -8,7 +8,7 @@ End-to-end pipeline: **collect teacher trajectories → SFT small model → eval
 |---|---|
 | Qwen3-4B-Instruct (base) | 7.0% |
 | DeepSeek-V4 (teacher) | 60.0% |
-| Qwen3-4B + QLoRA (student) | 20–25% (est.) |
+| Qwen3-4B + QLoRA (student) | 27.8% |
 
 ## Pipeline
 
@@ -35,7 +35,7 @@ End-to-end pipeline: **collect teacher trajectories → SFT small model → eval
    └────┬─────┘
         ▼
    Fine-tuned eval
-   pass^1 ≈ 20–25%
+   pass^1
 ```
 
 ## Quick Start
