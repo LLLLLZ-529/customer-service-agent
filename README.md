@@ -1,6 +1,6 @@
-# E-commerce Customer Service Agent — Distillation Pipeline
+# Agentic Tool-Calling Distillation: E-commerce Customer Service Agent
 
-End-to-end pipeline: **collect teacher trajectories → SFT small model → evaluate with τ-bench**.
+End-to-end **tool-calling agent** pipeline: collect teacher trajectories from DeepSeek → QLoRA fine-tune Qwen3-4B on **agentic tool-use trajectories** → evaluate on τ-bench retail.
 
 ## Results
 
