@@ -1,0 +1,25 @@
+# Secrets
+.env
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# Model weights (too large for git)
+models/
+lora_adapter/
+*.safetensors
+*.gguf
+
+# Dependencies
+wheels/
+
+# Submodules
+tau-bench/
+
+# Results (large JSON files)
+results/
+
+# OS
+.DS_Store
