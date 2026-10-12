@@ -1,0 +1,5 @@
+# Cordis patch: mount the retail tools plugin.
+# Replace the path with the absolute path to this plugin on your machine.
+- insert:
+  - id: retail-tools
+    name: "/Users/annedl/Doubao/chats/2026-10-07/new-chat/customer-service-agent/dsh-plugin/src/index.ts"
