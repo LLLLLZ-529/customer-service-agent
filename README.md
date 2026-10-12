@@ -1,124 +1,90 @@
-# Agentic Tool-Calling Distillation: E-commerce Customer Service Agent
+# 电商客服 Agent：基于教师轨迹蒸馏的工具调用能力微调
 
-End-to-end **tool-calling agent** pipeline: collect teacher trajectories from DeepSeek → QLoRA fine-tune Qwen3-4B on **agentic tool-use trajectories** → evaluate on τ-bench retail.
+## 项目背景
 
-## Results
+构建一个能在仿真电商场景中自动处理退换货、查订单等任务的智能客服 Agent。核心挑战是让一个 4B 小模型学会**准确调用工具**（查订单、处理退货等），而不是自由文本回答。
 
-| Model | pass^1 (τ-bench retail) |
-|---|---|
-| Qwen3-4B-Instruct (base) | 7.0% |
-| DeepSeek-V4 (teacher) | 60.0% |
-| Qwen3-4B + QLoRA (student) | 27.8% |
+## 仿真环境
 
-## Pipeline
+基于开源平台 **τ-bench**，自带：
+- 模拟数据库（虚拟订单、用户、商品）
+- 16 个工具 API（查订单、查商品、退货、换货等）
+- LLM 模拟用户
+- 115 个标准测试任务
+- 通过数据库最终状态哈希客观评分（PASS/FAIL）
+
+## 结果
+
+| 阶段 | 模型 | pass^1 | 说明 |
+|---|---|---|---|
+| 基线 | Qwen3-4B-Instruct (base) | **7.0%** | 小模型不会按格式调工具 |
+| 教师 | DeepSeek-V4 | **60.0%** | 大模型直接跑 115 任务 |
+| 学生 | Qwen3-4B + LoRA | **27.8%** | 蒸馏后，提升 **+20.8pp** |
+
+## 流程
 
 ```
-τ-bench 115 test tasks
+τ-bench 115 个任务
         │
-   ┌────┴─────┐
-   │          │
- Base eval   Teacher trajectory collection
- pass^1=7%   69/115 PASS → save trajectories
-   │          │
-   │          ▼
-   │    build_dataset.py (filter PASS, format ChatML)
-   │          │
-   │          ▼
-   │    data/lora/train.jsonl (58 dialogs)
-   │          │
-   │          ▼
-   │    mlx_lm.lora (QLoRA, rank=8, lr=1e-5)
-   │          │
-   │          ▼
-   │    lora_adapter/ (28MB)
-   │          │
-   └────┬─────┘
+   ┌────┴────────────┐
+   │                 │
+ Base 模型跑       教师模型跑
+ Qwen3-4B          DeepSeek-V4
+ pass^1 = 7%       pass^1 = 60%
+   │                 │
+   │            保留 69 条 PASS 轨迹
+   │                 │
+   │                 ▼
+   │          转换为 ChatML 训练数据
+   │                 │
+   │                 ▼
+   │          QLoRA 微调（rank=8, lr=1e-5）
+   │                 │
+   └────┬────────────┘
         ▼
-   Fine-tuned eval
-   pass^1
+   微调后 Qwen3-4B 跑 τ-bench
+   pass^1 = 27.8%（+20.8pp）
 ```
 
-## Quick Start
+## 关键技术
 
-### 1. Setup
+- **知识蒸馏**：大模型（DeepSeek）生成成功轨迹，小模型（Qwen3-4B）模仿学习
+- **工具调用学习**：模型从轨迹中学到工具调用顺序、JSON 格式、追问策略
+- **QLoRA 微调**：仅训练 28MB LoRA adapter，不改动基座权重
+- **τ-bench 客观评测**：数据库状态哈希比对，非 LLM 主观打分
 
-```bash
-# Install dependencies
-python -m venv .venv && source .venv/bin/activate
-pip install tau-bench litellm openai requests
-
-# Download Qwen3-4B-Instruct (8GB)
-# from ModelScope: Qwen/Qwen3-4B-Instruct-2507
-```
-
-### 2. Run base evaluation
+## 快速开始
 
 ```bash
-# Set API keys in .env
-cp .env.example .env
+# 安装依赖
+pip install tau-bench litellm openai
 
-# Run base model (local MLX server) on 115 tasks
-python eval/run_base.py 0 -1 ./results/base-full
-```
+# Base 基线评测
+python eval/run_base.py 0 -1 ./results/base
 
-### 3. Collect teacher trajectories
+# 采集教师轨迹
+python eval/run_teacher.py 0 -1 ./results/teacher
 
-```bash
-# DeepSeek as teacher, qwen-plus as user simulator
-python eval/run_teacher.py 0 -1 ./results/teacher-full
-```
-
-### 4. Build training dataset
-
-```bash
-# Filter PASS trajectories → ChatML format
+# 构建训练数据
 python build_dataset.py
+
+# LoRA 微调
+mlx_lm.lora --model ./models/Qwen3-4B --data ./data/lora --train --iters 100
+
+# 微调后评测
+python mlx_server.py &
+python eval/run_base.py 0 -1 ./results/ft
 ```
 
-### 5. LoRA fine-tuning (Mac / Apple Silicon)
-
-```bash
-mlx_lm.lora \
-  --model ./models/Qwen3-4B-Instruct-mlx \
-  --data ./data/lora \
-  --train \
-  --iters 100 \
-  --batch-size 1 \
-  --learning-rate 1e-5 \
-  --max-seq-length 2048 \
-  --adapter-path ./lora_adapter
-```
-
-### 6. Evaluate fine-tuned model
-
-```bash
-# Start local server with LoRA adapter
-python mlx_server.py
-
-# Run evaluation
-python eval/run_base.py 0 -1 ./results/ft-full
-```
-
-## Project Structure
+## 项目结构
 
 ```
-├── agent.py              # Standalone customer service agent
-├── mlx_server.py         # OpenAI-compatible MLX inference server
-├── build_dataset.py      # Teacher trajectories → ChatML training data
+├── agent.py              # 客服 Agent 脚本
+├── mlx_server.py          # OpenAI 兼容推理服务
+├── build_dataset.py       # 教师轨迹 → ChatML 训练数据
 ├── eval/
-│   ├── run_base.py       # Evaluate base / fine-tuned model
-│   └── run_teacher.py    # Collect teacher (DeepSeek) trajectories
-├── data/
-│   └── lora/
-│       ├── train.jsonl   # 58 training dialogs
-│       └── valid.jsonl   # 11 validation dialogs
-├── lora_adapter/         # Trained LoRA weights (28MB)
-└── results/              # Evaluation results (JSON)
+│   ├── run_base.py       # base/微调后评测
+│   └── run_teacher.py    # 教师轨迹采集
+├── data/lora/             # 训练数据
+└── lora_adapter/          # LoRA 权重
 ```
-
-## Key Tech
-
-- **τ-bench**: Retail customer service simulation (16 tools, 115 test tasks, DB-state hash scoring)
-- **MLX**: Apple Silicon local inference + QLoRA training
-- **Knowledge Distillation**: DeepSeek (teacher) → Qwen3-4B (student)
-- **ChatML**: Tool-call preserving conversation format
