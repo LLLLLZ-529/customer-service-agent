@@ -41,8 +41,14 @@ class ToolBridge:
                 task_split="test",
                 client=client,
             )
-            self.tools = ALL_TOOLS
-            print(f"Loaded {len(ALL_TOOLS)} retail tools")
+            # ALL_TOOLS 是 class 列表，转成 {name: tool_instance}
+            self.tools = {}
+            for tool_cls in ALL_TOOLS:
+                # 类名转蛇形，如 FindUserIdByEmail → find_user_id_by_email
+                import re
+                name = re.sub(r'(?<!^)(?=[A-Z])', '_', tool_cls.__name__).lower()
+                self.tools[name] = tool_cls
+            print(f"Loaded {len(self.tools)} retail tools: {list(self.tools.keys())[:5]}...")
         except Exception as e:
             print(f"Warning: Could not initialize full env: {e}")
             print("Bridge will run in schema-only mode")
