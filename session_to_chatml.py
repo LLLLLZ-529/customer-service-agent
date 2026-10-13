@@ -42,18 +42,32 @@ def extract_text(content_blocks: list) -> str:
 
 
 def load_session_events(path: Path) -> list:
-    """读 jsonl，逐行解析成事件列表。"""
+    """读 session 日志，逐行解析成事件列表。
+
+    dsh 默认把 session 存成 zstd 压缩的 jsonl（session.v*.jsonl.zstd），
+    这里自动检测后缀并解压。
+    """
+    raw = _read_raw(path)
     events = []
-    with open(path, "r", encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                events.append(json.loads(line))
-            except json.JSONDecodeError:
-                continue  # 跳过损坏行
+    for line in raw.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            events.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue  # 跳过损坏行
     return events
+
+
+def _read_raw(path: Path) -> str:
+    """读 session 文件，zstd 自动解压。"""
+    if path.suffix == ".zstd":
+        import zstandard as zstd
+        with open(path, "rb") as f:
+            return zstd.ZstdDecompressor().stream_reader(f).read().decode("utf-8")
+    with open(path, "r", encoding="utf-8") as f:
+        return f.read()
 
 
 def events_to_messages(events: list) -> list:
@@ -83,9 +97,12 @@ def events_to_messages(events: list) -> list:
         etype = ev.get("type")
         data = ev.get("data", {})
 
-        # ① 用户消息
+        # ① 用户消息（只保留真人发的，过滤 dsh 自动注入的 runtime context）
         if etype == "user/message":
             flush_assistant()  # 上一轮的 assistant 先落地
+            source_kind = data.get("source", {}).get("kind")
+            if source_kind != "user":
+                continue  # plugin/system 注入的上下文不进训练数据
             text = extract_text(data.get("content", []))
             if text:
                 messages.append({"role": "user", "content": text})

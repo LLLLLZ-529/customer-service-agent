@@ -61,17 +61,18 @@ def start_tool_bridge():
 
 
 def find_session_jsonl(session_id: str) -> Path | None:
-    """根据 session_id，在 DSH_HOME 下找到对应的 .jsonl 轨迹文件。
+    """根据 session_id，在 DSH_HOME 下找到对应的轨迹文件。
 
-    dsh 把 session 持久化成 JSONL，文件名里通常含 session id。
-    实际路径需要在首次跑通后确认，这里给一个通用的查找逻辑。
+    dsh 真实路径结构（已验证）：
+      <dsh_home>/sessions/<cwd转义>/<session_id>/session.v*.jsonl.zstd
     """
-    candidates = list(DSH_HOME.rglob(f"*{session_id}*.jsonl"))
-    if candidates:
-        return candidates[0]
-    # 兜底：找最新的 jsonl
-    all_jsonl = sorted(DSH_HOME.rglob("*.jsonl"), key=lambda p: p.stat().st_mtime)
-    return all_jsonl[-1] if all_jsonl else None
+    sessions_root = DSH_HOME / "sessions"
+    if not sessions_root.exists():
+        return None
+    # sessions/<cwd>/<session_id>/ 下找 session.v*.jsonl.zstd
+    for hit in sessions_root.rglob(f"{session_id}/session.v*.jsonl.zstd"):
+        return hit
+    return None
 
 
 def run_one_task(harness, task_id: str, initial_user_msg: str) -> dict:
