@@ -53,6 +53,47 @@
 - **QLoRA 微调**：仅训练 28MB LoRA adapter，不改动基座权重
 - **τ-bench 客观评测**：数据库状态哈希比对，非 LLM 主观打分
 
+## 基于 DeepSeek Harness 的轨迹采集 Pipeline
+
+除了用 τ-bench 自带 agent 采集轨迹，还基于开源 Agent 框架 [DeepSeek Harness (dsh)](https://github.com/deepseek-ai/deepseek-harness) 做了二次开发，实现了一套独立的轨迹采集 pipeline。
+
+### 为什么用 dsh
+
+dsh 是 DeepSeek 开源的 Agent 运行框架（TypeScript），内核是一个 `ReactLoopAgent` 状态机，负责对话循环、工具调度、会话记录。通过它的 **Python SDK**（`deepseek-harness-sdk`）可以脚本化批量驱动 Agent，而不是手动开 web UI。
+
+### 架构
+
+```
+dsh SDK 驱动 DeepSeek 教师模型跑任务
+    │
+    ├─ dsh 插件 → HTTP tool bridge → τ-bench 16 个零售工具
+    │   （TS 与 Python 跨语言桥接，工具在仿真环境真实执行）
+    │
+    ├─ dsh 自动将全过程记录为 session（append-only 事件流，zstd 压缩）
+    │   事件类型：user/message, assistant/message, tool/call, tool/result
+    │
+    └─ session_to_chatml.py：解析事件流 → 过滤注入消息 → 折叠成 ChatML 多轮轨迹
+        → 直接作为 QLoRA 训练数据
+```
+
+### 二次开发内容
+
+| 文件 | 作用 |
+|---|---|
+| `collect_traces.py` | dsh Python SDK 批量跑任务，自动收集 session 文件 |
+| `session_to_chatml.py` | 解析 dsh session 事件流（支持 zstd 解压），转成 ChatML |
+| `tool_bridge.py` | τ-bench 工具的 HTTP 桥接，供 dsh 插件调用 |
+| `dsh-plugin/` | TypeScript 插件，注册 16 个零售工具到 dsh 工具注册表 |
+
+### 关键技术点
+
+- **跨语言桥接**：dsh 是 TypeScript，τ-bench 是 Python，通过 HTTP 打通
+- **事件流解析**：dsh 把"模型回复"和"工具调用"拆成独立事件，按 step 折叠回一条 assistant 消息
+- **自动过滤注入消息**：dsh 会自动注入 runtime context（`source.kind=plugin`），训练时只保留真人消息（`source.kind=user`）
+- **zstd 自动解压**：dsh session 默认 zstd 压缩，解析时自动解压
+
+已端到端验证：dsh SDK 启动 → DeepSeek 回复 → session 落盘 → zstd 解压 → 转成干净 ChatML。
+
 ## 进阶：生产级 Agent 运行时机制
 
 参考开源客服 Harness [Ecbot](https://github.com/blackmouse572/ecbot)，实现两个工业级运行时机制。
@@ -116,16 +157,18 @@ python eval/run_base.py 0 -1 ./results/ft
 ```
 ├── agent.py              # 客服 Agent 脚本
 ├── mlx_server.py          # OpenAI 兼容推理服务
-├── build_dataset.py       # 教师轨迹 → ChatML 训练数据
+├── build_dataset.py       # τ-bench 教师轨迹 → ChatML
+├── session_to_chatml.py   # dsh session → ChatML（二次开发）
+├── collect_traces.py      # dsh SDK 批量采集轨迹（二次开发）
 ├── tool_bridge.py         # τ-bench 工具 HTTP 桥接
 ├── eval/
 │   ├── run_base.py       # base/微调后评测
-│   └── run_teacher.py    # 教师轨迹采集
+│   └── run_teacher.py    # τ-bench 教师轨迹采集
 ├── src/advanced/
 │   ├── generation_lease.py    # 生成租约：防过时回复
 │   ├── smart_escalation.py    # 智能转人工：愤怒/注入/低置信度
 │   └── demo.py                # 两个机制的演示
-├── dsh-plugin/           # DeepSeek Harness 零售工具插件
+├── dsh-plugin/           # DeepSeek Harness 零售工具插件（TS）
 ├── data/lora/             # 训练数据
 └── lora_adapter/          # LoRA 权重
 ```
